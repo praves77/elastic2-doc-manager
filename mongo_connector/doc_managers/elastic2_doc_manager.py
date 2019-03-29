@@ -325,22 +325,30 @@ class DocManager(DocManagerBase):
         doc_id = str(doc.pop("_id"))
         metadata = {"ns": namespace, "_ts": timestamp}
 
+        action_source = self._formatter.format_document(doc)
+
         # Index the source document, using lowercase namespace as index name.
         action = {
             "_op_type": "index",
             "_index": index,
             "_type": doc_type,
             "_id": doc_id,
-            "_source": self._formatter.format_document(doc),
+            "_source": action_source,
         }
+
+        meta_action_source = bson.json_util.dumps(metadata)
+
         # Index document metadata with original namespace (mixed upper/lower).
         meta_action = {
             "_op_type": "index",
             "_index": self.meta_index_name,
             "_type": self.meta_type,
             "_id": doc_id,
-            "_source": bson.json_util.dumps(metadata),
+            "_source": meta_action_source,
         }
+
+        # LOG.info('_ action_source: "{a}"'.format(a=action_source))
+        # LOG.info('_ meta_action_source: "{m}"'.format(m=meta_action_source))
 
         self.index(action, meta_action, doc, update_spec)
 
@@ -357,18 +365,35 @@ class DocManager(DocManagerBase):
                 # Remove metadata and redundant _id
                 index, doc_type = self._index_and_mapping(namespace)
                 doc_id = str(doc.pop("_id"))
+                routing = False
+                if namespace == "resources_and_run_data.resources_and_run_data":
+                    if doc.get("propertyId") and doc.get("resourceId"):
+                        routing = True
+                        doc["data_join"] = {
+                            "name": "resourceId",
+                            "parent": doc.get("resourceId")
+                        }
+                    else:
+                        doc["data_join"] = "_id"
+
                 document_action = {
                     "_index": index,
                     "_type": doc_type,
                     "_id": doc_id,
                     "_source": self._formatter.format_document(doc),
                 }
+
                 document_meta = {
                     "_index": self.meta_index_name,
                     "_type": self.meta_type,
                     "_id": doc_id,
                     "_source": {"ns": namespace, "_ts": timestamp},
                 }
+
+                if routing is True:
+                    document_action["_routing"] = doc.get("resourceId")
+                    document_meta["_routing"] = doc.get("resourceId")
+
                 yield document_action
                 yield document_meta
             if doc is None:
@@ -475,6 +500,33 @@ class DocManager(DocManagerBase):
         )
 
     def index(self, action, meta_action, doc_source=None, update_spec=None):
+        LOG.info('_ action: "{a}"'.format(a=action))
+        # LOG.info('_ doc_source: "{d}"'.format(d=doc_source))
+        LOG.info('_ meta_action: "{m}"'.format(m=meta_action))
+        # LOG.info('_ update_spec: "{u}"'.format(u=update_spec))
+
+        namespace = action["_type"]
+        if namespace == "resources_and_run_data":
+            # action["_routing"] = doc_source['resourceId']
+            # meta_action["_routing"] = doc_source['resourceId']
+            if doc_source:
+                is_child1 = doc_source.get("propertyId") and doc_source.get("resourceId")
+                is_child2 = action['_source'].get("propertyId") and action['_source'].get("resourceId")
+                if is_child1 or is_child2:
+                    action['_source']['data_join'] = {
+                        "name": "resourceId",
+                        "parent": action['_source']['resourceId']
+                    }
+                    doc_source['data_join'] = {
+                        "name": "resourceId",
+                        "parent": doc_source['resourceId']
+                    }
+                    action["_routing"] = doc_source['resourceId']
+                    meta_action["_routing"] = doc_source['resourceId']
+                else:
+                    action['_source']['data_join'] = '_id'
+                    doc_source['data_join'] = '_id'
+
         with self.lock:
             self.BulkBuffer.add_upsert(action, meta_action, doc_source, update_spec)
 
