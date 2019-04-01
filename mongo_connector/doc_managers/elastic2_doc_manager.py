@@ -389,7 +389,6 @@ class DocManager(DocManagerBase):
 
                 if routing is True:
                     document_action["_routing"] = doc.get("resourceId")
-                    document_meta["_routing"] = doc.get("resourceId")
 
                 yield document_action
                 yield document_meta
@@ -497,8 +496,8 @@ class DocManager(DocManagerBase):
         )
 
     def index(self, action, meta_action, doc_source=None, update_spec=None):
-        # LOG.info('_ action: "{a}"'.format(a=action))
-        # LOG.info('_ meta_action: "{m}"'.format(m=meta_action))
+        # LOG.info('_ INDEX action: "{a}"'.format(a=action))
+        # LOG.info('_ INDEX meta_action: "{m}"'.format(m=meta_action))
 
         namespace = action["_type"]
         if namespace == "resources_and_run_data":
@@ -515,7 +514,6 @@ class DocManager(DocManagerBase):
                         "parent": doc_source['resourceId']
                     }
                     action["_routing"] = doc_source['resourceId']
-                    meta_action["_routing"] = doc_source['resourceId']
                 else:
                     action['_source']['data_join'] = '_id'
                     doc_source['data_join'] = '_id'
