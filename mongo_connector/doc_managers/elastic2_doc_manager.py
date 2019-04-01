@@ -347,9 +347,6 @@ class DocManager(DocManagerBase):
             "_source": meta_action_source,
         }
 
-        # LOG.info('_ action_source: "{a}"'.format(a=action_source))
-        # LOG.info('_ meta_action_source: "{m}"'.format(m=meta_action_source))
-
         self.index(action, meta_action, doc, update_spec)
 
         # Leave _id, since it's part of the original document
@@ -500,15 +497,11 @@ class DocManager(DocManagerBase):
         )
 
     def index(self, action, meta_action, doc_source=None, update_spec=None):
-        LOG.info('_ action: "{a}"'.format(a=action))
-        # LOG.info('_ doc_source: "{d}"'.format(d=doc_source))
-        LOG.info('_ meta_action: "{m}"'.format(m=meta_action))
-        # LOG.info('_ update_spec: "{u}"'.format(u=update_spec))
+        # LOG.info('_ action: "{a}"'.format(a=action))
+        # LOG.info('_ meta_action: "{m}"'.format(m=meta_action))
 
         namespace = action["_type"]
         if namespace == "resources_and_run_data":
-            # action["_routing"] = doc_source['resourceId']
-            # meta_action["_routing"] = doc_source['resourceId']
             if doc_source:
                 is_child1 = doc_source.get("propertyId") and doc_source.get("resourceId")
                 is_child2 = action['_source'].get("propertyId") and action['_source'].get("resourceId")
@@ -725,9 +718,23 @@ class BulkBuffer(object):
             # Everytime update locally stored sources to keep them up-to-date
             self.add_to_sources(doc, updated)
 
+            current_doc = self.docman._formatter.format_document(updated)
+
+            if doc["_index"] == "resources_and_run_data":
+                if current_doc.get("propertyId") and current_doc.get("resourceId"):
+                    current_doc["data_join"] = {
+                        "name": "resourceId",
+                        "parent": current_doc.get("resourceId")
+                    }
+                    self.action_buffer[action_buffer_index][
+                        "_routing"
+                    ] = current_doc.get("resourceId")
+                else:
+                    current_doc["data_join"] = "_id"
+
             self.action_buffer[action_buffer_index][
                 "_source"
-            ] = self.docman._formatter.format_document(updated)
+            ] = current_doc
 
         # Remove empty actions if there were errors
         self.action_buffer = [
