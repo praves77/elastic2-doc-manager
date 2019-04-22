@@ -409,6 +409,7 @@ class DocManager(DocManagerBase):
 
             for ok, resp in responses:
                 if not ok:
+                    LOG.info('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
                     LOG.error(
                         "Could not bulk-upsert document "
                         "into ElasticSearch: %r" % resp
