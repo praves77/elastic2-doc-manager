@@ -388,6 +388,7 @@ class DocManager(DocManagerBase):
                 }
 
                 if routing is True:
+                    document_meta["_routing"] = doc.get("resourceId")
                     document_action["_routing"] = doc.get("resourceId")
 
                 yield document_action
@@ -514,7 +515,7 @@ class DocManager(DocManagerBase):
                         "name": "resourceId",
                         "parent": doc_source['resourceId']
                     }
-                    action["_routing"] = doc_source['resourceId']
+                    action["_routing"] = doc_source.get('resourceId')
                 else:
                     action['_source']['data_join'] = '_id'
                     doc_source['data_join'] = '_id'
@@ -725,9 +726,8 @@ class BulkBuffer(object):
                         "name": "resourceId",
                         "parent": current_doc.get("resourceId")
                     }
-                    self.action_buffer[action_buffer_index][
-                        "_routing"
-                    ] = current_doc.get("resourceId")
+                    doc["_routing"] = current_doc.get("resourceId")
+                    self.action_buffer[action_buffer_index]["_routing"] = current_doc.get("resourceId")
                 else:
                     current_doc["data_join"] = "_id"
 
