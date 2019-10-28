@@ -46,6 +46,12 @@ from elasticsearch.helpers import bulk, scan, streaming_bulk, BulkIndexError
 
 import importlib_metadata
 
+import prometheus_client
+from prometheus_client import Summary, Counter
+
+import json
+from jsondiff import diff
+
 from mongo_connector import errors
 from mongo_connector.constants import DEFAULT_COMMIT_INTERVAL, DEFAULT_MAX_BULK
 from mongo_connector.util import exception_wrapper, retry_until_ok
@@ -78,6 +84,8 @@ DEFAULT_AWS_REGION = "us-east-1"
 
 __version__ = importlib_metadata.version("elastic2_doc_manager")
 
+ERROR_TIME = Summary('dm_error_time', 'Errors thrown')
+ERROR_CAUGHT = Counter('dm_error_caught', 'Error thrown', ['message', 'response'])
 
 def convert_aws_args(aws_args):
     """Convert old style options into arguments to boto3.session.Session."""
@@ -111,7 +119,6 @@ def create_aws_auth(aws_args):
         aws_session.region_name or DEFAULT_AWS_REGION,
         "es",
     )
-
 
 class AutoCommiter(threading.Thread):
     """Thread that periodically sends buffered operations to Elastic.
@@ -200,6 +207,12 @@ class DocManager(DocManagerBase):
             url = [url]
         self.elastic = Elasticsearch(hosts=url, **client_options)
 
+        self.summary_title = 'dm_ingestion_time'
+        self.counter_title = 'dm_ingest'
+        self.REQUEST_TIME = Summary(self.summary_title, 'Bulk operations throughput')
+        self.ingest_rate = Counter(self.counter_title, 'Number of documents ingested per bulk operation',
+                                   ['collectionName'])
+
         self._formatter = DefaultDocumentFormatter()
         self.BulkBuffer = BulkBuffer(self)
 
@@ -222,6 +235,52 @@ class DocManager(DocManagerBase):
             self, self.auto_send_interval, self.auto_commit_interval
         )
         self.auto_commiter.start()
+
+        # with open('./config/mapping_resources_and_run_data.json', 'r') as mapping_config:
+        #     try:
+        #         # local_mapping = json.load(mapping_config)
+        #         # local_mapping = str(local_mapping)
+        #
+        #         # try:
+        #         #     es_mapping = self.elastic.indices.get_mapping(index='resources_and_run_data')
+        #         #     es_mapping = es_mapping\
+        #         #         .get('resources_and_run_data')\
+        #         #         .get('mappings')\
+        #         #         .get('resources_and_run_data')
+        #         #
+        #         #     # es_mapping = str(es_mapping)
+        #         #
+        #         #     # is_mapping_correct = local_mapping == es_mapping
+        #         #     is_mapping_correct = diff(local_mapping, es_mapping)
+        #         #
+        #         #     LOG.always('*******************************************')
+        #         #     LOG.always('LOCAL')
+        #         #     LOG.always(local_mapping)
+        #         #     LOG.always('*******************************************')
+        #         #     LOG.always(' ')
+        #         #     LOG.always(' ')
+        #         #     LOG.always('*******************************************')
+        #         #     LOG.always('ES')
+        #         #     LOG.always(es_mapping)
+        #         #     LOG.always('*******************************************')
+        #         #
+        #         #     LOG.always('*******************************************')
+        #         #     LOG.always('diff')
+        #         #     LOG.always(is_mapping_correct)
+        #         #     LOG.always('*******************************************')
+        #
+        #             # if not is_mapping_correct:
+        #
+        #         except errors.ConnectionFailed:
+        #             LOG.exception(
+        #                 'Could not load mapping config on Elasticsearch'
+        #             )
+        #     except ValueError:
+        #         LOG.exception(
+        #             'Could not load mappings file'
+        #         )
+        #
+        #         return
 
     def _index_and_mapping(self, namespace):
         """Helper method for getting the index and type from a namespace."""
@@ -353,10 +412,11 @@ class DocManager(DocManagerBase):
         doc["_id"] = doc_id
 
     @wrap_exceptions
-    def bulk_upsert(self, docs, namespace, timestamp):
+    def bulk_upsert(self, docs, namespace, timestamp, collectionName):
         """Insert multiple documents into Elasticsearch."""
 
         def docs_to_upsert():
+            doc_count = 0
             doc = None
             for doc in docs:
                 # Remove metadata and redundant _id
@@ -393,16 +453,36 @@ class DocManager(DocManagerBase):
 
                 yield document_action
                 yield document_meta
+
+                doc_count += 1
             if doc is None:
                 raise errors.EmptyDocsError(
                     "Cannot upsert an empty sequence of "
                     "documents into Elastic Search"
                 )
 
+            LOG.always(" - - - - - COLLECTION")
+            LOG.always(collectionName)
+            LOG.always(" - - - - - # OF DOCS")
+            LOG.always(doc_count)
+
         try:
             kw = {}
             if self.chunk_size > 0:
                 kw["chunk_size"] = self.chunk_size
+
+            ns, ns2 = namespace.split(".", 1)
+
+            if collectionName:
+                index_name, ns = collectionName.split(".", 1)
+
+            @self.REQUEST_TIME.time()
+            def process_request(metric):
+                metric.inc()
+
+            @ERROR_TIME.time()
+            def error_catch(error):
+                error.inc()
 
             responses = streaming_bulk(
                 client=self.elastic, actions=docs_to_upsert(), **kw
@@ -415,6 +495,12 @@ class DocManager(DocManagerBase):
                         "Could not bulk-upsert document "
                         "into ElasticSearch: %r" % resp
                     )
+
+                    error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', resp))
+                else:
+                    if resp.get('index').get('_type') != 'mongodb_meta':
+                        process_request(self.ingest_rate.labels(ns))
+
             if self.auto_commit_interval == 0:
                 self.commit()
         except errors.EmptyDocsError:
@@ -475,6 +561,21 @@ class DocManager(DocManagerBase):
             "_id": str(document_id),
         }
 
+        # When removing a runData doc, we need to get the routing field into our action data
+        # This allows the parent+child relationship to successfully dissolve on removal
+        # Without the _routing field, this operation will throw an exception
+        if index == 'resources_and_run_data':
+            hit = self.elastic.search(
+                index=index,
+                body={ "query": { "match": { "_id": str(document_id) } } },
+                size=1
+            )["hits"]["hits"]
+
+            for result in hit:
+                if result and result['_routing']:
+                    action['_routing'] = result['_routing']
+                    meta_action['_routing'] = result['_routing']
+
         self.index(action, meta_action)
 
     @wrap_exceptions
@@ -498,9 +599,6 @@ class DocManager(DocManagerBase):
         )
 
     def index(self, action, meta_action, doc_source=None, update_spec=None):
-        # LOG.info('_ INDEX action: "{a}"'.format(a=action))
-        # LOG.info('_ INDEX meta_action: "{m}"'.format(m=meta_action))
-
         namespace = action["_type"]
         if namespace == "resources_and_run_data":
             if doc_source:
@@ -536,6 +634,10 @@ class DocManager(DocManagerBase):
         This method is periodically called by the AutoCommitThread.
         """
         with self.lock:
+            @ERROR_TIME.time()
+            def error_catch(error):
+                error.inc()
+
             try:
                 action_buffer = self.BulkBuffer.get_buffer()
                 if action_buffer:
@@ -545,8 +647,12 @@ class DocManager(DocManagerBase):
                         successes,
                     )
                     if errors:
+                        for error in errors:
+                            error_catch(ERROR_CAUGHT.labels('Bulk request error', error))
+
                         LOG.error("Bulk request finished with errors: %r", errors)
             except es_exceptions.ElasticsearchException:
+                error_catch(ERROR_CAUGHT.labels('Bulk request failed with exception', 'send_buffered_operations'))
                 LOG.exception("Bulk request failed with exception")
 
     def commit(self):
@@ -676,6 +782,10 @@ class BulkBuffer(object):
         """Update local sources based on response from Elasticsearch"""
         ES_documents = self.get_docs_sources_from_ES()
 
+        @ERROR_TIME.time()
+        def error_catch(error):
+            error.inc()
+
         for doc, update_spec, action_buffer_index, get_from_ES in self.doc_to_update:
             if get_from_ES:
                 # Update source based on response from ES
@@ -692,6 +802,13 @@ class BulkBuffer(object):
                         doc["_id"],
                         update_spec,
                     )
+
+                    error_res = {
+                        doc: doc,
+                        update_spec: update_spec
+                    }
+                    error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', error_res))
+
                     self.reset_action(action_buffer_index)
                     continue
             else:
@@ -706,6 +823,13 @@ class BulkBuffer(object):
                         doc["_id"],
                         update_spec,
                     )
+
+                    error_res = {
+                        doc: doc,
+                        update_spec: update_spec
+                    }
+                    error_catch(self.ERROR_CAUGHT.labels('mGET: Document id has not been found in local sources. Due to that following update failed', error_res))
+
                     self.reset_action(action_buffer_index)
                     continue
 
