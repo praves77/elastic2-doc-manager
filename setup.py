@@ -10,7 +10,7 @@ setuptools.setup(
     author="anna herlihy",
     author_email="mongodb-user@googlegroups.com",
     url="https://github.com/mongodb-labs/elastic2-doc-manager",
-    install_requires=["mongo-connector>=2.5.0", "importlib_metadata"],
+    install_requires=["mongo-connector>=2.5.0", "importlib_metadata", "jsondiff"],
     python_requires=">=2.7",
     extras_require={
         "aws": ["boto3 >= 1.4.0", "requests-aws-sign >= 0.1.2"],
