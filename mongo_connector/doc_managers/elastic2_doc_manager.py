@@ -49,8 +49,8 @@ import importlib_metadata
 import prometheus_client
 from prometheus_client import Summary, Counter
 
-import json
-from jsondiff import diff
+# import json
+# from jsondiff import diff
 
 from mongo_connector import errors
 from mongo_connector.constants import DEFAULT_COMMIT_INTERVAL, DEFAULT_MAX_BULK
@@ -213,6 +213,11 @@ class DocManager(DocManagerBase):
         self.ingest_rate = Counter(self.counter_title, 'Number of documents ingested per bulk operation',
                                    ['collectionName'])
 
+        self.doc_summary_title = 'new_doc_operation_time'
+        self.doc_count_title = 'new_doc_operation'
+        self.REQUEST_TIME_OP = Summary(self.doc_summary_title, 'Operations on documents for Elasticsearch')
+        self.doc_operation_count = Counter(self.doc_count_title, 'Document operation', ['operation_type', 'index'])
+
         self._formatter = DefaultDocumentFormatter()
         self.BulkBuffer = BulkBuffer(self)
 
@@ -360,6 +365,10 @@ class DocManager(DocManagerBase):
             document = self.BulkBuffer.get_from_sources(
                 index, doc_type, str(document_id)
             )
+
+        LOG.always('_________________________ UPDATING FILE')
+        LOG.always(update_spec)
+
         if document:
             # Document source collected from local buffer
             # Perform apply_update on it and then it will be
@@ -367,17 +376,17 @@ class DocManager(DocManagerBase):
             updated = self.apply_update(document, update_spec)
             # _id is immutable in MongoDB, so won't have changed in update
             updated["_id"] = document_id
-            self.upsert(updated, namespace, timestamp)
+            self.upsert(updated, namespace, timestamp, None, True)
         else:
             # Document source needs to be retrieved from Elasticsearch
             # before performing update. Pass update_spec to upsert function
             updated = {"_id": document_id}
-            self.upsert(updated, namespace, timestamp, update_spec)
+            self.upsert(updated, namespace, timestamp, update_spec, False)
         # upsert() strips metadata, so only _id + fields in _source still here
         return updated
 
     @wrap_exceptions
-    def upsert(self, doc, namespace, timestamp, update_spec=None):
+    def upsert(self, doc, namespace, timestamp, update_spec=None, is_update=False):
         """Insert a document into Elasticsearch."""
         index, doc_type = self._index_and_mapping(namespace)
         # No need to duplicate '_id' in source document
@@ -395,6 +404,8 @@ class DocManager(DocManagerBase):
             "_source": action_source,
         }
 
+        LOG.always('_________________________ UPSERTING FILE')
+
         meta_action_source = bson.json_util.dumps(metadata)
 
         # Index document metadata with original namespace (mixed upper/lower).
@@ -405,6 +416,10 @@ class DocManager(DocManagerBase):
             "_id": doc_id,
             "_source": meta_action_source,
         }
+
+        if is_update:
+            action['_update'] = True
+            meta_action['_update'] = True
 
         self.index(action, meta_action, doc, update_spec)
 
@@ -540,6 +555,8 @@ class DocManager(DocManagerBase):
             "_source": bson.json_util.dumps(metadata),
         }
 
+        LOG.always('_________________________ INSERTING FILE')
+
         self.index(action, meta_action)
 
     @wrap_exceptions
@@ -565,16 +582,19 @@ class DocManager(DocManagerBase):
         # This allows the parent+child relationship to successfully dissolve on removal
         # Without the _routing field, this operation will throw an exception
         if index == 'resources_and_run_data':
-            hit = self.elastic.search(
-                index=index,
-                body={ "query": { "match": { "_id": str(document_id) } } },
-                size=1
-            )["hits"]["hits"]
+            try:
+                hit = self.elastic.search(
+                    index=index,
+                    body={ "query": { "match": { "_id": str(document_id) } } },
+                    size=1
+                )["hits"]["hits"]
 
-            for result in hit:
-                if result and result['_routing']:
-                    action['_routing'] = result['_routing']
-                    meta_action['_routing'] = result['_routing']
+                for result in hit:
+                    if result and result['_routing']:
+                        action['_routing'] = result['_routing']
+                        meta_action['_routing'] = result['_routing']
+            except:
+                LOG.error('EXCEPTION: COULD NOT FIND DOCUMENT IN ELASTICSEARCH FOR REMOVAL OPERATION')
 
         self.index(action, meta_action)
 
@@ -614,6 +634,7 @@ class DocManager(DocManagerBase):
                         "parent": doc_source['resourceId']
                     }
                     action["_routing"] = doc_source.get('resourceId')
+                    meta_action["_routing"] = doc_source.get('resourceId')
                 else:
                     action['_source']['data_join'] = '_id'
                     doc_source['data_join'] = '_id'
@@ -646,11 +667,56 @@ class DocManager(DocManagerBase):
                         "Bulk request finished, successfully sent %d " "operations",
                         successes,
                     )
+
+                    LOG.always(' ')
+                    LOG.always(' ')
+                    LOG.always('*****************************************')
+                    LOG.always(' ')
+                    LOG.always('SUCCESSES')
+                    LOG.always(successes)
+                    LOG.always(' ')
+                    LOG.always('ACTION BUFFER')
+                    LOG.always(action_buffer)
+                    LOG.always(' ')
+                    LOG.always('*****************************************')
+                    LOG.always(' ')
+                    LOG.always(' ')
+
                     if errors:
                         for error in errors:
                             error_catch(ERROR_CAUGHT.labels('Bulk request error', error))
 
                         LOG.error("Bulk request finished with errors: %r", errors)
+
+                    # TODO: Add collection name as label
+                    @self.REQUEST_TIME_OP.time()
+                    def process_request(operation_type, index):
+                        self.doc_operation_count.labels(operation_type, index).inc()
+
+                    doc = action_buffer[0]
+                    index = doc.get('_index')
+                    meta_doc = action_buffer[1]
+                    meta_index = meta_doc.get('_index')
+                    operation_type = doc.get('_op_type')
+
+                    if doc.get('_update'):
+                        process_request('update', index)
+                        process_request('update', meta_index)
+                        LOG.always('UPDATE!')
+                    elif operation_type == 'index':
+                        process_request('add', index)
+                        process_request('add', meta_index)
+                        LOG.always('ADD!')
+                    elif operation_type == 'delete':
+                        process_request('remove', index)
+                        process_request('remove', meta_index)
+                        LOG.always('REMOVE!')
+
+                    # LOG.always(
+                    #     "Counter: Documents removed: %d, "
+                    #     "inserted: %d, updated: %d so far" % (
+                    #         op_remove, op_add, op_update))
+
             except es_exceptions.ElasticsearchException:
                 error_catch(ERROR_CAUGHT.labels('Bulk request failed with exception', 'send_buffered_operations'))
                 LOG.exception("Bulk request failed with exception")
@@ -744,7 +810,7 @@ class BulkBuffer(object):
         doc = {
             "_index": action["_index"],
             "_type": action["_type"],
-            "_id": action["_id"],
+            "_id": action["_id"]
         }
 
         # If get_from_ES == True -> get document's source from Elasticsearch
@@ -858,6 +924,9 @@ class BulkBuffer(object):
             self.action_buffer[action_buffer_index][
                 "_source"
             ] = current_doc
+
+            doc['_update'] = True
+            self.action_buffer[action_buffer_index]['_update'] = True
 
         # Remove empty actions if there were errors
         self.action_buffer = [
