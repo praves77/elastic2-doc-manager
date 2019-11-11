@@ -702,21 +702,16 @@ class DocManager(DocManagerBase):
 
                     doc = action_buffer[0]
                     index = doc.get('_index')
-                    meta_doc = action_buffer[1]
-                    meta_index = meta_doc.get('_index')
                     operation_type = doc.get('_op_type')
 
                     if doc.get('_update'):
                         process_request('update', index)
-                        process_request('update', meta_index)
                         LOG.always('UPDATE!')
                     elif operation_type == 'index':
                         process_request('add', index)
-                        process_request('add', meta_index)
                         LOG.always('ADD!')
                     elif operation_type == 'delete':
                         process_request('remove', index)
-                        process_request('remove', meta_index)
                         LOG.always('REMOVE!')
 
                     # LOG.always(
