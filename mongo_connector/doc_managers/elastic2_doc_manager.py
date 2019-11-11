@@ -22,6 +22,7 @@ import logging
 import threading
 import time
 import warnings
+import os
 
 import bson.json_util
 
@@ -438,15 +439,17 @@ class DocManager(DocManagerBase):
                 index, doc_type = self._index_and_mapping(namespace)
                 doc_id = str(doc.pop("_id"))
                 routing = False
-                if namespace == "resources_and_run_data.resources_and_run_data":
-                    if doc.get("propertyId") and doc.get("resourceId"):
-                        routing = True
-                        doc["data_join"] = {
-                            "name": "resourceId",
-                            "parent": doc.get("resourceId")
-                        }
-                    else:
-                        doc["data_join"] = "_id"
+
+                if os.environ.get('JOIN_INDEX'):
+                    if namespace == os.environ.get('JOIN_INDEX')+"."+os.environ.get('JOIN_INDEX'):
+                        if doc.get(os.environ.get('CHILD_FIELD_1')) and doc.get(os.environ.get('CHILD_FIELD_2')):
+                            routing = True
+                            doc["data_join"] = {
+                                "name": os.environ.get('JOIN_FIELD'),
+                                "parent": doc.get(os.environ.get('JOIN_FIELD'))
+                            }
+                        else:
+                            doc["data_join"] = "_id"
 
                 document_action = {
                     "_index": index,
@@ -463,8 +466,8 @@ class DocManager(DocManagerBase):
                 }
 
                 if routing is True:
-                    document_meta["_routing"] = doc.get("resourceId")
-                    document_action["_routing"] = doc.get("resourceId")
+                    document_meta["_routing"] = doc.get(os.environ.get('JOIN_FIELD'))
+                    document_action["_routing"] = doc.get(os.environ.get('JOIN_FIELD'))
 
                 yield document_action
                 yield document_meta
@@ -581,7 +584,7 @@ class DocManager(DocManagerBase):
         # When removing a runData doc, we need to get the routing field into our action data
         # This allows the parent+child relationship to successfully dissolve on removal
         # Without the _routing field, this operation will throw an exception
-        if index == 'resources_and_run_data':
+        if os.environ.get('JOIN_INDEX') and (index == os.environ.get('JOIN_INDEX')):
             try:
                 hit = self.elastic.search(
                     index=index,
@@ -619,25 +622,29 @@ class DocManager(DocManagerBase):
         )
 
     def index(self, action, meta_action, doc_source=None, update_spec=None):
-        namespace = action["_type"]
-        if namespace == "resources_and_run_data":
-            if doc_source:
-                is_child1 = doc_source.get("propertyId") and doc_source.get("resourceId")
-                is_child2 = action['_source'].get("propertyId") and action['_source'].get("resourceId")
-                if is_child1 or is_child2:
-                    action['_source']['data_join'] = {
-                        "name": "resourceId",
-                        "parent": action['_source']['resourceId']
-                    }
-                    doc_source['data_join'] = {
-                        "name": "resourceId",
-                        "parent": doc_source['resourceId']
-                    }
-                    action["_routing"] = doc_source.get('resourceId')
-                    meta_action["_routing"] = doc_source.get('resourceId')
-                else:
-                    action['_source']['data_join'] = '_id'
-                    doc_source['data_join'] = '_id'
+        if os.environ.get('JOIN_INDEX'):
+            namespace = action["_type"]
+            if namespace == os.environ.get('JOIN_INDEX'):
+                if doc_source:
+                    is_child1 = doc_source.get(os.environ.get('CHILD_FIELD_1')) and \
+                                doc_source.get(os.environ.get('CHILD_FIELD_2'))
+                    is_child2 = action['_source'].get(os.environ.get('CHILD_FIELD_1')) and \
+                                action['_source'].get(os.environ.get('CHILD_FIELD_2'))
+
+                    if is_child1 or is_child2:
+                        action['_source']['data_join'] = {
+                            "name": os.environ.get('JOIN_FIELD'),
+                            "parent": action['_source'][os.environ.get('JOIN_FIELD')]
+                        }
+                        doc_source['data_join'] = {
+                            "name": os.environ.get('JOIN_FIELD'),
+                            "parent": doc_source[os.environ.get('JOIN_FIELD')]
+                        }
+                        action["_routing"] = doc_source.get(os.environ.get('JOIN_FIELD'))
+                        meta_action["_routing"] = doc_source.get(os.environ.get('JOIN_FIELD'))
+                    else:
+                        action['_source']['data_join'] = '_id'
+                        doc_source['data_join'] = '_id'
 
         with self.lock:
             self.BulkBuffer.add_upsert(action, meta_action, doc_source, update_spec)
@@ -910,14 +917,17 @@ class BulkBuffer(object):
 
             current_doc = self.docman._formatter.format_document(updated)
 
-            if doc["_index"] == "resources_and_run_data":
-                if current_doc.get("propertyId") and current_doc.get("resourceId"):
+            if os.environ.get('JOIN_INDEX') and (doc["_index"] == os.environ.get('JOIN_INDEX')):
+                if current_doc.get(os.environ.get('CHILD_FIELD_1')) and \
+                        current_doc.get(os.environ.get('CHILD_FIELD_2')):
                     current_doc["data_join"] = {
-                        "name": "resourceId",
-                        "parent": current_doc.get("resourceId")
+                        "name": os.environ.get('JOIN_FIELD'),
+                        "parent": current_doc.get(os.environ.get('JOIN_FIELD'))
                     }
-                    doc["_routing"] = current_doc.get("resourceId")
-                    self.action_buffer[action_buffer_index]["_routing"] = current_doc.get("resourceId")
+                    doc["_routing"] = current_doc.get(os.environ.get('JOIN_FIELD'))
+                    self.action_buffer[action_buffer_index]["_routing"] = current_doc.get(
+                        os.environ.get('JOIN_FIELD')
+                    )
                 else:
                     current_doc["data_join"] = "_id"
 
