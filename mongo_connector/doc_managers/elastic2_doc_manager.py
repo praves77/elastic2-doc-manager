@@ -204,6 +204,9 @@ class DocManager(DocManagerBase):
             client_options["use_ssl"] = True
             client_options["verify_certs"] = True
             client_options["connection_class"] = es_connection.RequestsHttpConnection
+        else:
+            client_options["verify_certs"] = False
+
         if type(url) is not list:
             url = [url]
         self.elastic = Elasticsearch(hosts=url, **client_options)
