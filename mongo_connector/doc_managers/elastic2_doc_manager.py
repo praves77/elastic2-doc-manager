@@ -214,7 +214,16 @@ class DocManager(DocManagerBase):
         LOG.always('URL IN DOC MANAGER:')
         LOG.always(url)
 
-        self.elastic = Elasticsearch(hosts=url, **client_options)
+        # self.elastic = Elasticsearch(hosts=url, **client_options)
+
+        elastic_url = os.environ.get('ELASTIC_USER') + ":" + os.environ.get('ELASTIC_PASSWORD') + "@" + \
+                      os.environ.get('ELASTIC_HOST') + ":" + os.environ.get('ELASTIC_PORT') + "/"
+
+        self.elastic = Elasticsearch(
+            [elastic_url],
+            verify_certs=True,
+            use_ssl=True
+        )
 
         self.summary_title = 'dm_ingestion_time'
         self.counter_title = 'dm_ingest'
