@@ -219,8 +219,11 @@ class DocManager(DocManagerBase):
         elastic_url = os.environ.get('ELASTIC_USER') + ":" + os.environ.get('ELASTIC_PASSWORD') + "@" + \
                       os.environ.get('ELASTIC_HOST') + ":" + os.environ.get('ELASTIC_PORT') + "/"
 
+        LOG.always('SELF-ASSEMBLED ELASTIC URL IN DOC MANAGER:')
+        LOG.always(elastic_url)
+
         self.elastic = Elasticsearch(
-            [elastic_url],
+            hosts=[elastic_url],
             verify_certs=True,
             use_ssl=True
         )
