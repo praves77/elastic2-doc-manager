@@ -225,7 +225,7 @@ class DocManager(DocManagerBase):
 
         self.elastic = Elasticsearch(
             hosts=[elastic_url],
-            verify_certs=True,
+            verify_certs=False,
             use_ssl=True
         )
 
