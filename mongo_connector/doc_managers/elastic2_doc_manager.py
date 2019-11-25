@@ -220,7 +220,7 @@ class DocManager(DocManagerBase):
                       os.environ.get('ELASTIC_HOST') + ":" + os.environ.get('ELASTIC_PORT') + "/"
 
         self.elastic = Elasticsearch(
-            hosts=[elastic_url],
+            [elastic_url],
             verify_certs=True,
             use_ssl=True
         )
