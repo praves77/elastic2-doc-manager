@@ -470,7 +470,7 @@ class DocManager(DocManagerBase):
                                 "parent": doc.get(os.environ.get('JOIN_FIELD'))
                             }
                         else:
-                            doc["data_join"] = "_id"
+                            doc["data_join"] = { "name": "_id" }
 
                 document_action = {
                     "_index": index,
@@ -529,7 +529,7 @@ class DocManager(DocManagerBase):
 
             for ok, resp in responses:
                 if not ok:
-                    LOG.info('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
+                    LOG.always('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
                     LOG.error(
                         "Could not bulk-upsert document "
                         "into ElasticSearch: %r" % resp
@@ -664,8 +664,8 @@ class DocManager(DocManagerBase):
                         action["_routing"] = doc_source.get(os.environ.get('JOIN_FIELD'))
                         meta_action["_routing"] = doc_source.get(os.environ.get('JOIN_FIELD'))
                     else:
-                        action['_source']['data_join'] = '_id'
-                        doc_source['data_join'] = '_id'
+                        action['_source']['data_join'] = { 'name': '_id' }
+                        doc_source['data_join'] = { 'name': '_id' }
 
         with self.lock:
             self.BulkBuffer.add_upsert(action, meta_action, doc_source, update_spec)
@@ -945,7 +945,7 @@ class BulkBuffer(object):
                         os.environ.get('JOIN_FIELD')
                     )
                 else:
-                    current_doc["data_join"] = "_id"
+                    current_doc["data_join"] = { "name": "_id" }
 
             self.action_buffer[action_buffer_index][
                 "_source"
