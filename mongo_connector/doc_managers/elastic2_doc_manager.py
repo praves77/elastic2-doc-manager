@@ -510,6 +510,9 @@ class DocManager(DocManagerBase):
             if self.chunk_size > 0:
                 kw["chunk_size"] = self.chunk_size
 
+            # TODO: Try setting this to combat connectionpool timeout
+            # kw["max_retries"] = 10
+
             ns, ns2 = namespace.split(".", 1)
 
             if collectionName:
@@ -522,6 +525,18 @@ class DocManager(DocManagerBase):
             @ERROR_TIME.time()
             def error_catch(error):
                 error.inc()
+
+            LOG.always(' ')
+            LOG.always(' ')
+            LOG.always('- - - - - - - - -')
+            LOG.always(' ')
+            LOG.always('args:')
+            LOG.always(' ')
+            LOG.always(kw)
+            LOG.always(' ')
+            LOG.always('- - - - - - - - -')
+            LOG.always(' ')
+            LOG.always(' ')
 
             responses = streaming_bulk(
                 client=self.elastic, actions=docs_to_upsert(), **kw
