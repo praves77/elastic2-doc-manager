@@ -216,17 +216,29 @@ class DocManager(DocManagerBase):
         LOG.always(url)
 
         # self.elastic = Elasticsearch(hosts=url, **client_options)
+        protocol = "http" if (os.environ.get('ELASTIC_SSL_ENABLED') == "false") else "https"
+        username = os.environ.get('ELASTIC_USER')
+        password = os.environ.get('ELASTIC_PASSWORD')
+        hostname = os.environ.get('ELASTIC_HOST')
+        port = os.environ.get('ELASTIC_PORT')
 
-        elastic_url = "https://" + os.environ.get('ELASTIC_USER') + ":" + os.environ.get('ELASTIC_PASSWORD') + "@" + \
-                      os.environ.get('ELASTIC_HOST') + ":" + os.environ.get('ELASTIC_PORT') + "/"
+        if username and password:
+            elastic_url = "{0}://{1}:{2}@{3}:{4}/".format(protocol, username, password, hostname, port)
+        else:
+            elastic_url = "{0}://{1}:{2}/".format(protocol, hostname, port)
 
         LOG.always('SELF-ASSEMBLED ELASTIC URL IN DOC MANAGER:')
         LOG.always(elastic_url)
 
+        if os.environ.get('ELASTIC_SSL_ENABLED') == "false":
+            use_ssl = False
+        else:
+            use_ssl = True
+
         self.elastic = Elasticsearch(
             hosts=[elastic_url],
             verify_certs=False,
-            use_ssl=True
+            use_ssl=use_ssl
         )
 
         self.summary_title = 'dm_ingestion_time'
