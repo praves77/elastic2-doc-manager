@@ -400,8 +400,8 @@ class DocManager(DocManagerBase):
                 index, doc_type, str(document_id)
             )
 
-        LOG.always('_________________________ UPDATING FILE')
-        LOG.always(update_spec)
+        LOG.debug('_________________________ UPDATING FILE')
+        LOG.debug(update_spec)
 
         if document:
             # Document source collected from local buffer
@@ -438,7 +438,7 @@ class DocManager(DocManagerBase):
             "_source": action_source,
         }
 
-        LOG.always('_________________________ UPSERTING FILE')
+        LOG.debug('_________________________ UPSERTING FILE')
 
         meta_action_source = bson.json_util.dumps(metadata)
 
@@ -543,7 +543,7 @@ class DocManager(DocManagerBase):
 
             for ok, resp in responses:
                 if not ok:
-                    LOG.always('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
+                    LOG.error('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
                     LOG.error(
                         "Could not bulk-upsert document "
                         "into ElasticSearch: %r" % resp
@@ -593,7 +593,7 @@ class DocManager(DocManagerBase):
             "_source": bson.json_util.dumps(metadata),
         }
 
-        LOG.always('_________________________ INSERTING FILE')
+        LOG.debug('_________________________ INSERTING FILE')
 
         self.index(action, meta_action)
 
@@ -710,19 +710,19 @@ class DocManager(DocManagerBase):
                         successes,
                     )
 
-                    LOG.always(' ')
-                    LOG.always(' ')
-                    LOG.always('*****************************************')
-                    LOG.always(' ')
-                    LOG.always('SUCCESSES')
-                    LOG.always(successes)
-                    LOG.always(' ')
-                    LOG.always('ACTION BUFFER')
-                    LOG.always(action_buffer)
-                    LOG.always(' ')
-                    LOG.always('*****************************************')
-                    LOG.always(' ')
-                    LOG.always(' ')
+                    LOG.debug(' ')
+                    LOG.debug(' ')
+                    LOG.debug('*****************************************')
+                    LOG.debug(' ')
+                    LOG.debug('SUCCESSES')
+                    LOG.debug(successes)
+                    LOG.debug(' ')
+                    LOG.debug('ACTION BUFFER')
+                    LOG.debug(action_buffer)
+                    LOG.debug(' ')
+                    LOG.debug('*****************************************')
+                    LOG.debug(' ')
+                    LOG.debug(' ')
 
                     if errors:
                         for error in errors:
@@ -741,13 +741,13 @@ class DocManager(DocManagerBase):
 
                     if doc.get('_update'):
                         process_request('update', index)
-                        LOG.always('UPDATE!')
+                        LOG.debug('UPDATE!')
                     elif operation_type == 'index':
                         process_request('add', index)
-                        LOG.always('ADD!')
+                        LOG.debug('ADD!')
                     elif operation_type == 'delete':
                         process_request('remove', index)
-                        LOG.always('REMOVE!')
+                        LOG.debug('REMOVE!')
 
                     # LOG.always(
                     #     "Counter: Documents removed: %d, "
