@@ -276,10 +276,10 @@ class DocManager(DocManagerBase):
         self.elastic = Elasticsearch(
             hosts=[elastic_url],
             verify_certs=False,
-            use_ssl=use_ssl
-            # timeout=timeout,
-            # max_retries=max_retries,
-            # retry_on_timeout=retry_on_timeout,
+            use_ssl=use_ssl,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_on_timeout=retry_on_timeout
             # sniff_on_start=sniff_on_start,
             # sniff_on_connection_fail=sniff_on_connection_fail,
             # sniffer_timeout=sniffer_timeout
