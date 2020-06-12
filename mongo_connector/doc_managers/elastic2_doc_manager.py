@@ -255,7 +255,7 @@ class DocManager(DocManagerBase):
 
         LOG.info(" value of ELASTIC_TIMEOUT: {}".format(timeout))
         LOG.info(" value of ELASTIC_MAX_RETRY: {}".format(max_retries))
-        Log.info(" value of ELASTIC_RETRY_ON_TIMEOUT: {}".format(retry_on_timeout))
+        LOG.info(" value of ELASTIC_RETRY_ON_TIMEOUT: {}".format(retry_on_timeout))
 
         # We're not using sniffing now - we will fix it using Connection with credentials.
         sniff_on_start = bool(int(__get_os_environ_or_default__('ELASTIC_SNIFF_ON_START', True)))
