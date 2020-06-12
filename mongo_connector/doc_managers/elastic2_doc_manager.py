@@ -121,6 +121,33 @@ def create_aws_auth(aws_args):
         "es",
     )
 
+def __get_os_environ_or_default__(env_key, default_value, log_message=True):
+    """ Returns the value for os.environ[environ_key], or default.
+
+    Parameters
+    ----------
+    env_key : str
+        The key used to access os.environ[].
+    default_value
+        The value to default to if os.environ[environ_key] is not found.
+    log_message : bool
+        If true, print whether the value was found or not.
+    """
+    try:
+        result = os.environ[env_key]
+        if not len(result):
+            raise KeyError('{} is an empty string'.format(env_key))
+        message = 'ENV VAR found {}={}'.format(env_key, result)
+    except KeyError:
+        result = default_value
+        message = '-- did not find {0}; forced {0}={1}'.format(env_key, result)
+
+    if log_message:
+        LOG.info(message)
+
+    return result
+
+
 class AutoCommiter(threading.Thread):
     """Thread that periodically sends buffered operations to Elastic.
 
@@ -222,6 +249,15 @@ class DocManager(DocManagerBase):
         hostname = os.environ.get('ELASTIC_HOST')
         port = os.environ.get('ELASTIC_PORT')
 
+        timeout = int(__get_os_environ_or_default__('ELASTIC_TIMEOUT', 10))
+        max_retries = int(__get_os_environ_or_default__('ELASTIC_MAX_RETRY', 10))
+        retry_on_timeout = bool(int(__get_os_environ_or_default__('ELASTIC_RETRY_ON_TIMEOUT', True)))
+
+        # We're not using sniffing now - we will fix it using Connection with credentials.
+        sniff_on_start = bool(int(__get_os_environ_or_default__('ELASTIC_SNIFF_ON_START', True)))
+        sniff_on_connection_fail = bool(int(__get_os_environ_or_default__('ELASTIC_SNIFF_ON_CONN_FAIL', True)))
+        sniffer_timeout = int(__get_os_environ_or_default__('ELASTIC_SNIFFER_TIMEOUT', 20))
+
         if username and password:
             elastic_url = "{0}://{1}:{2}@{3}:{4}/".format(protocol, username, password, hostname, port)
         else:
@@ -235,10 +271,21 @@ class DocManager(DocManagerBase):
         else:
             use_ssl = True
 
+        # https://stackoverflow.com/questions/25908484/how-to-fix-read-timed-out-in-elasticsearch
+        # es = Elasticsearch(timeout=30, max_retries=10, retry_on_timeout=True)
+        # https://elasticsearch-py.readthedocs.io/en/master/#sniffing
+        # Sniffing caused authentication issue - it appears it was using username/password to retry. We'll revisit
+        # this later to check if sniff can be integrated in case needed. Disabling it for now. SEAR-392
         self.elastic = Elasticsearch(
             hosts=[elastic_url],
             verify_certs=False,
-            use_ssl=use_ssl
+            use_ssl=use_ssl,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_on_timeout=retry_on_timeout
+            # sniff_on_start=sniff_on_start,
+            # sniff_on_connection_fail=sniff_on_connection_fail,
+            # sniffer_timeout=sniffer_timeout
         )
 
         self.summary_title = 'dm_ingestion_time'
@@ -542,17 +589,17 @@ class DocManager(DocManagerBase):
             )
 
             for ok, resp in responses:
-                if not ok:
-                    LOG.error('_ ERROR RESP: bulk_upsert: "{r}"'.format(r=resp))
-                    LOG.error(
-                        "Could not bulk-upsert document "
-                        "into ElasticSearch: %r" % resp
-                    )
+                try:
+                    if not ok:
+                        LOG.error('_ Could not bulk-upsert document. ERROR RESP: {r}'.format(r=resp))
 
-                    error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', resp))
-                else:
-                    if resp.get('index').get('_type') != 'mongodb_meta':
-                        process_request(self.ingest_rate.labels(ns))
+                        error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', resp))
+                    else:
+                        if resp.get('index').get('_type') != 'mongodb_meta':
+                            process_request(self.ingest_rate.labels(ns))
+                except Exception as e:
+                    err_msg = 'ES doc manager bulk insert threw exception: {}'.format(e)
+                    LOG.exception(err_msg)
 
             if self.auto_commit_interval == 0:
                 self.commit()
@@ -754,9 +801,9 @@ class DocManager(DocManagerBase):
                     #     "inserted: %d, updated: %d so far" % (
                     #         op_remove, op_add, op_update))
 
-            except es_exceptions.ElasticsearchException:
+            except es_exceptions.ElasticsearchException as e:
                 error_catch(ERROR_CAUGHT.labels('Bulk request failed with exception', 'send_buffered_operations'))
-                LOG.exception("Bulk request failed with exception")
+                LOG.exception("Bulk request failed with exception {}".format(e))
 
     def commit(self):
         """Send buffered requests and refresh all indexes."""
