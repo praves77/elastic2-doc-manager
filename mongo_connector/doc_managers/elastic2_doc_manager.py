@@ -134,7 +134,7 @@ def __get_os_environ_or_default__(env_key, default_value, log_message=True):
         If true, print whether the value was found or not.
     """
     try:
-        result = os.env[env_key]
+        result = os.environ[env_key]
         if not len(result):
             raise KeyError('{} is an empty string'.format(env_key))
         message = 'ENV VAR found {}={}'.format(env_key, result)
