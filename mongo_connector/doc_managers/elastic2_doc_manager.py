@@ -249,9 +249,13 @@ class DocManager(DocManagerBase):
         hostname = os.environ.get('ELASTIC_HOST')
         port = os.environ.get('ELASTIC_PORT')
 
-        timeout = int(__get_os_environ_or_default__('ELASTIC_TIMEOUT', 10))
-        max_retries = int(__get_os_environ_or_default__('ELASTIC_MAX_RETRY', 10))
+        timeout = int(__get_os_environ_or_default__('ELASTIC_TIMEOUT', 30))
+        max_retries = int(__get_os_environ_or_default__('ELASTIC_MAX_RETRY', 20))
         retry_on_timeout = bool(int(__get_os_environ_or_default__('ELASTIC_RETRY_ON_TIMEOUT', True)))
+
+        LOG.info(" value of ELASTIC_TIMEOUT: {}".format(ELASTIC_TIMEOUT))
+        LOG.info(" value of ELASTIC_MAX_RETRY: {}".format(ELASTIC_MAX_RETRY))
+        Log.info(" value of ELASTIC_RETRY_ON_TIMEOUT: {}".format(ELASTIC_RETRY_ON_TIMEOUT))
 
         # We're not using sniffing now - we will fix it using Connection with credentials.
         sniff_on_start = bool(int(__get_os_environ_or_default__('ELASTIC_SNIFF_ON_START', True)))
@@ -589,17 +593,13 @@ class DocManager(DocManagerBase):
             )
 
             for ok, resp in responses:
-                try:
-                    if not ok:
-                        LOG.error('_ Could not bulk-upsert document. ERROR RESP: {r}'.format(r=resp))
+                if not ok:
+                    LOG.error('_ Could not bulk-upsert document. ERROR RESP: {r}'.format(r=resp))
 
-                        error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', resp))
-                    else:
-                        if resp.get('index').get('_type') != 'mongodb_meta':
-                            process_request(self.ingest_rate.labels(ns))
-                except Exception as e:
-                    err_msg = 'ES doc manager bulk insert threw exception: {}'.format(e)
-                    LOG.exception(err_msg)
+                    error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', resp))
+                else:
+                    if resp.get('index').get('_type') != 'mongodb_meta':
+                        process_request(self.ingest_rate.labels(ns))
 
             if self.auto_commit_interval == 0:
                 self.commit()
