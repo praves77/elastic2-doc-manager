@@ -925,7 +925,9 @@ class BulkBuffer(object):
         if docs:
             LOG.info("Payload to _mget call:{}".format(docs))
             #for all docs delete '_update' property. See SEAR-412
-            [ del d['_update'] for d in docs if '_update' in d ]
+            for d in docs:
+                if '_update' in d:
+                    del d['_update']
             documents = self.docman.elastic.mget(body={"docs": docs}, realtime=True)
             return iter(documents["docs"])
         else:
