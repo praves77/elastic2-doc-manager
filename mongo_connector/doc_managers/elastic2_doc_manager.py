@@ -923,7 +923,7 @@ class BulkBuffer(object):
         #Use a new list as we are dropping _update field for mget
         docs = list([doc for doc, _, _, get_from_ES in self.doc_to_update if get_from_ES])
         if docs:
-            LOG.info("Payload to _mget call:{}".format(docs))
+            # LOG.info("Payload to _mget call:{}".format(docs))
             #for all docs delete '_update' property. See SEAR-412
             for d in docs:
                 if '_update' in d:
