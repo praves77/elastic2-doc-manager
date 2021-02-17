@@ -920,7 +920,7 @@ class BulkBuffer(object):
 
     def get_docs_sources_from_ES(self):
         """Get document sources using MGET elasticsearch API"""
-        docs = [doc for doc, _, _, get_from_ES in self.doc_to_update if get_from_ES]
+        docs = list([doc for doc, _, _, get_from_ES in self.doc_to_update if get_from_ES])
         if docs:
             LOG.info("Payload to _mget call:{}".format(docs))
             """for all docs delete '_update' property. See SEAR-412"""
