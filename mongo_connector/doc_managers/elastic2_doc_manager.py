@@ -960,8 +960,8 @@ class BulkBuffer(object):
                     )
 
                     error_res = {
-                        doc: doc,
-                        update_spec: update_spec
+                        "doc": doc,
+                        "update_spec": update_spec
                     }
                     error_catch(ERROR_CAUGHT.labels('Could not bulk-upsert document into ElasticSearch', error_res))
 
@@ -981,8 +981,8 @@ class BulkBuffer(object):
                     )
 
                     error_res = {
-                        doc: doc,
-                        update_spec: update_spec
+                        "doc": doc,
+                        "update_spec": update_spec
                     }
                     error_catch(self.ERROR_CAUGHT.labels('mGET: Document id has not been found in local sources. Due to that following update failed', error_res))
 
